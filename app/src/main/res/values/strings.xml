@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Arushi AI Assistant</string>
+    <string name="assistant_title">Arushi AI</string>
+    <string name="assistant_subtitle">Multilingual Live Voice Assistant</string>
+    <string name="permission_mic_rationale">Microphone access is required for real-time voice conversation with Arushi.</string>
+    <string name="permission_contacts_rationale">Contacts access allows Arushi to find contacts and make calls by name.</string>
+    <string name="permission_phone_rationale">Phone permission enables Arushi to place calls directly when requested.</string>
+</resources>
