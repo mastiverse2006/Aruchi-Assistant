@@ -1,6 +1,6 @@
 {
-  "name": "Arushi AI Assistant",
-  "description": "Multilingual voice AI assistant powered by Gemini Live with real device actions.",
+  "name": "Durefishan Assistant",
+  "description": "Premium female AI voice assistant with offline & live intelligence, deep app actions, and custom commands.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

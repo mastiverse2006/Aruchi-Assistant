@@ -21,7 +21,7 @@ class DeviceActionManager(private val context: Context) {
   }
 
   /**
-   * Opens WhatsApp if installed, or falls back to WhatsApp Web link.
+   * Opens WhatsApp app or deep links.
    */
   fun openWhatsApp(): ActionResult {
     val pm = context.packageManager
@@ -31,41 +31,202 @@ class DeviceActionManager(private val context: Context) {
       val intent = pm.getLaunchIntentForPackage(pkg)
       if (intent != null) {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        try {
+        return try {
           context.startActivity(intent)
-          return ActionResult(
+          ActionResult(
             success = true,
-            message = "WhatsApp opened successfully.",
+            message = "WhatsApp opened.",
             actionType = ActionIconType.WHATSAPP,
-            detail = "Package: $pkg"
+            detail = pkg
           )
         } catch (e: Exception) {
-          Log.e(TAG, "Error launching $pkg", e)
+          Log.e(TAG, "Error opening WhatsApp package", e)
+          ActionResult(false, "WhatsApp launch failed: ${e.message}", ActionIconType.WHATSAPP)
         }
       }
     }
 
-    // Fallback to WhatsApp Web URL
+    val fallback = openUrl("https://wa.me/")
+    return fallback.copy(
+      message = "WhatsApp app is not installed. Opened WhatsApp in browser.",
+      actionType = ActionIconType.WHATSAPP
+    )
+  }
+
+  /**
+   * Opens WhatsApp chat with a contact phone number, optionally with pre-filled message.
+   */
+  fun openWhatsAppChat(phoneNumber: String, messageText: String = ""): ActionResult {
+    val cleaned = phoneNumber.replace(Regex("[^0-9+]"), "")
+    val encodedMsg = Uri.encode(messageText)
+    val url = if (cleaned.isNotEmpty()) {
+      if (messageText.isNotEmpty()) "https://api.whatsapp.com/send?phone=$cleaned&text=$encodedMsg"
+      else "https://api.whatsapp.com/send?phone=$cleaned"
+    } else {
+      "https://wa.me/"
+    }
+
     return try {
-      val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/")).apply {
+      val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+        setPackage("com.whatsapp")
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
       }
-      context.startActivity(webIntent)
+      context.startActivity(intent)
       ActionResult(
         success = true,
-        message = "WhatsApp app is not installed. Opened WhatsApp in browser.",
+        message = if (cleaned.isNotEmpty()) "Opening WhatsApp chat with $cleaned." else "Opening WhatsApp.",
         actionType = ActionIconType.WHATSAPP,
-        detail = "https://wa.me/"
+        detail = url
       )
-    } catch (e: Exception) {
-      Log.e(TAG, "Failed to launch WhatsApp URL", e)
-      ActionResult(
-        success = false,
-        message = "Could not open WhatsApp on this device.",
-        actionType = ActionIconType.WHATSAPP,
-        detail = e.localizedMessage ?: "Unknown error"
-      )
+    } catch (_: Exception) {
+      // Fallback to generic browser / app chooser
+      openUrl(url)
     }
+  }
+
+  /**
+   * Opens Instagram, Reels, or Direct.
+   */
+  fun openInstagram(destination: String = "home"): ActionResult {
+    val pm = context.packageManager
+    val igPkg = "com.instagram.android"
+    val isInstalled = pm.getLaunchIntentForPackage(igPkg) != null
+
+    return when (destination.lowercase()) {
+      "reels" -> {
+        try {
+          val uri = Uri.parse("https://www.instagram.com/reels/")
+          val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+            if (isInstalled) setPackage(igPkg)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+          }
+          context.startActivity(intent)
+          ActionResult(true, "Opening Instagram Reels.", ActionIconType.APP, "Instagram Reels")
+        } catch (e: Exception) {
+          openUrl("https://www.instagram.com/reels/")
+        }
+      }
+
+      "direct", "dm" -> {
+        try {
+          val uri = Uri.parse("https://www.instagram.com/direct/inbox/")
+          val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+            if (isInstalled) setPackage(igPkg)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+          }
+          context.startActivity(intent)
+          ActionResult(true, "Opening Instagram Direct Messages.", ActionIconType.APP, "Instagram DM")
+        } catch (e: Exception) {
+          openUrl("https://www.instagram.com/direct/inbox/")
+        }
+      }
+
+      else -> {
+        if (isInstalled) {
+          val intent = pm.getLaunchIntentForPackage(igPkg)?.apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+          }
+          if (intent != null) {
+            context.startActivity(intent)
+            return ActionResult(true, "Instagram opened.", ActionIconType.APP, igPkg)
+          }
+        }
+        openUrl("https://www.instagram.com")
+      }
+    }
+  }
+
+  /**
+   * Opens YouTube, YouTube Shorts, or searches YouTube.
+   */
+  fun openYouTube(destination: String = "home", query: String = ""): ActionResult {
+    val pm = context.packageManager
+    val ytPkg = "com.google.android.youtube"
+    val isInstalled = pm.getLaunchIntentForPackage(ytPkg) != null
+
+    return when {
+      destination.equals("shorts", ignoreCase = true) -> {
+        try {
+          val uri = Uri.parse("https://www.youtube.com/shorts")
+          val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+            if (isInstalled) setPackage(ytPkg)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+          }
+          context.startActivity(intent)
+          ActionResult(true, "Opening YouTube Shorts.", ActionIconType.APP, "YouTube Shorts")
+        } catch (e: Exception) {
+          openUrl("https://www.youtube.com/shorts")
+        }
+      }
+
+      query.isNotBlank() -> {
+        try {
+          val uri = Uri.parse("https://www.youtube.com/results?search_query=${Uri.encode(query)}")
+          val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+            if (isInstalled) setPackage(ytPkg)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+          }
+          context.startActivity(intent)
+          ActionResult(true, "Searching YouTube for '$query'.", ActionIconType.APP, "Search: $query")
+        } catch (e: Exception) {
+          openUrl("https://www.youtube.com/results?search_query=${Uri.encode(query)}")
+        }
+      }
+
+      else -> {
+        if (isInstalled) {
+          val intent = pm.getLaunchIntentForPackage(ytPkg)?.apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+          }
+          if (intent != null) {
+            context.startActivity(intent)
+            return ActionResult(true, "YouTube opened.", ActionIconType.APP, ytPkg)
+          }
+        }
+        openUrl("https://www.youtube.com")
+      }
+    }
+  }
+
+  /**
+   * Opens TikTok app or web.
+   */
+  fun openTikTok(): ActionResult {
+    val pm = context.packageManager
+    val tiktokPackages = listOf("com.zhiliaoapp.musically", "com.ss.android.ugc.trill")
+    for (pkg in tiktokPackages) {
+      val intent = pm.getLaunchIntentForPackage(pkg)
+      if (intent != null) {
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return try {
+          context.startActivity(intent)
+          ActionResult(true, "TikTok opened.", ActionIconType.APP, pkg)
+        } catch (e: Exception) {
+          Log.e(TAG, "Error opening TikTok", e)
+          ActionResult(false, "Could not launch TikTok: ${e.message}", ActionIconType.APP)
+        }
+      }
+    }
+    return openUrl("https://www.tiktok.com")
+  }
+
+  /**
+   * Opens Snapchat app or web.
+   */
+  fun openSnapchat(): ActionResult {
+    val pm = context.packageManager
+    val snapPkg = "com.snapchat.android"
+    val intent = pm.getLaunchIntentForPackage(snapPkg)
+    if (intent != null) {
+      intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      return try {
+        context.startActivity(intent)
+        ActionResult(true, "Snapchat opened.", ActionIconType.APP, snapPkg)
+      } catch (e: Exception) {
+        ActionResult(false, "Could not open Snapchat: ${e.message}", ActionIconType.APP)
+      }
+    }
+    return openUrl("https://www.snapchat.com")
   }
 
   /**
@@ -74,79 +235,60 @@ class DeviceActionManager(private val context: Context) {
   fun openApp(appName: String): ActionResult {
     val trimmed = appName.trim().lowercase()
 
-    // Specific well-known aliases and native intents
-    when {
-      trimmed.contains("setting") -> {
-        return try {
-          val intent = Intent(Settings.ACTION_SETTINGS).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-          }
-          context.startActivity(intent)
-          ActionResult(
-            success = true,
-            message = "Settings opened.",
-            actionType = ActionIconType.SETTINGS,
-            detail = "Android Settings"
-          )
-        } catch (e: Exception) {
-          ActionResult(false, "Could not open Settings: ${e.message}", ActionIconType.SETTINGS)
-        }
-      }
-
-      trimmed.contains("camera") -> {
-        return try {
-          val intent = Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-          }
-          context.startActivity(intent)
-          ActionResult(
-            success = true,
-            message = "Camera opened.",
-            actionType = ActionIconType.APP,
-            detail = "Camera"
-          )
-        } catch (e: Exception) {
-          ActionResult(false, "Could not open Camera: ${e.message}", ActionIconType.APP)
-        }
-      }
-
-      trimmed.contains("youtube") -> {
-        val ytIntent = context.packageManager.getLaunchIntentForPackage("com.google.android.youtube")
-        if (ytIntent != null) {
-          ytIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-          context.startActivity(ytIntent)
-          return ActionResult(true, "YouTube opened.", ActionIconType.APP, "com.google.android.youtube")
-        }
-        return openUrl("https://www.youtube.com")
-      }
-
-      trimmed.contains("instagram") -> {
-        val igIntent = context.packageManager.getLaunchIntentForPackage("com.instagram.android")
-        if (igIntent != null) {
-          igIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-          context.startActivity(igIntent)
-          return ActionResult(true, "Instagram opened.", ActionIconType.APP, "com.instagram.android")
-        }
-        return openUrl("https://www.instagram.com")
-      }
-
-      trimmed.contains("chrome") -> {
-        val chromeIntent = context.packageManager.getLaunchIntentForPackage("com.android.chrome")
-        if (chromeIntent != null) {
-          chromeIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-          context.startActivity(chromeIntent)
-          return ActionResult(true, "Google Chrome opened.", ActionIconType.APP, "com.android.chrome")
-        }
-        return openUrl("https://www.google.com")
-      }
-
-      trimmed.contains("whatsapp") -> {
-        return openWhatsApp()
-      }
+    return when {
+      trimmed.contains("reels") -> openInstagram("reels")
+      trimmed.contains("insta") -> openInstagram("home")
+      trimmed.contains("youtube") && trimmed.contains("short") -> openYouTube("shorts")
+      trimmed.contains("youtube") -> openYouTube("home")
+      trimmed.contains("tiktok") -> openTikTok()
+      trimmed.contains("snapchat") || trimmed.contains("snap") -> openSnapchat()
+      trimmed.contains("whatsapp") -> openWhatsApp()
+      trimmed.contains("setting") -> openSettings()
+      trimmed.contains("camera") -> openCamera()
+      trimmed.contains("chrome") -> openChrome()
+      else -> launchGenericApp(appName)
     }
+  }
 
-    // Generic search across launcher apps
+  fun openSettings(): ActionResult {
+    return try {
+      val intent = Intent(Settings.ACTION_SETTINGS).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      context.startActivity(intent)
+      ActionResult(true, "Settings opened.", ActionIconType.SETTINGS, "Android Settings")
+    } catch (e: Exception) {
+      ActionResult(false, "Could not open Settings: ${e.message}", ActionIconType.SETTINGS)
+    }
+  }
+
+  fun openCamera(): ActionResult {
+    return try {
+      val intent = Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      context.startActivity(intent)
+      ActionResult(true, "Camera opened.", ActionIconType.APP, "Camera")
+    } catch (e: Exception) {
+      ActionResult(false, "Could not open Camera: ${e.message}", ActionIconType.APP)
+    }
+  }
+
+  fun openChrome(): ActionResult {
     val pm = context.packageManager
+    val chromePkg = "com.android.chrome"
+    val intent = pm.getLaunchIntentForPackage(chromePkg)
+    if (intent != null) {
+      intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      context.startActivity(intent)
+      return ActionResult(true, "Google Chrome opened.", ActionIconType.APP, chromePkg)
+    }
+    return openUrl("https://www.google.com")
+  }
+
+  private fun launchGenericApp(appName: String): ActionResult {
+    val pm = context.packageManager
+    val trimmed = appName.trim().lowercase()
     val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
       addCategory(Intent.CATEGORY_LAUNCHER)
     }
@@ -164,12 +306,7 @@ class DeviceActionManager(private val context: Context) {
         launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(launchIntent)
         val appLabel = match.loadLabel(pm).toString()
-        return ActionResult(
-          success = true,
-          message = "$appLabel opened.",
-          actionType = ActionIconType.APP,
-          detail = pkg
-        )
+        return ActionResult(true, "$appLabel opened.", ActionIconType.APP, pkg)
       }
     }
 
@@ -177,7 +314,7 @@ class DeviceActionManager(private val context: Context) {
       success = false,
       message = "Could not find an installed app matching '$appName'.",
       actionType = ActionIconType.APP,
-      detail = "Search query: $appName"
+      detail = "Not installed"
     )
   }
 
@@ -195,34 +332,42 @@ class DeviceActionManager(private val context: Context) {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
       }
       context.startActivity(intent)
-      ActionResult(
-        success = true,
-        message = "Opened link: $formattedUrl",
-        actionType = ActionIconType.URL,
-        detail = formattedUrl
-      )
+      ActionResult(true, "Opened link: $formattedUrl", ActionIconType.URL, formattedUrl)
     } catch (e: Exception) {
       Log.e(TAG, "Error opening URL: $formattedUrl", e)
-      ActionResult(
-        success = false,
-        message = "Failed to open link: ${e.message}",
-        actionType = ActionIconType.URL,
-        detail = formattedUrl
-      )
+      ActionResult(false, "Failed to open link: ${e.message}", ActionIconType.URL, formattedUrl)
     }
   }
 
   /**
-   * Initiates a phone call or opens the dialer with the phone number pre-filled.
+   * Prepares or sends an SMS message.
+   */
+  fun sendSms(phoneNumber: String, messageBody: String): ActionResult {
+    val cleaned = phoneNumber.replace(Regex("[^0-9+]"), "")
+    return try {
+      val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$cleaned")).apply {
+        putExtra("sms_body", messageBody)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      context.startActivity(intent)
+      ActionResult(
+        success = true,
+        message = "SMS ready for $cleaned: '$messageBody'",
+        actionType = ActionIconType.APP,
+        detail = "smsto:$cleaned"
+      )
+    } catch (e: Exception) {
+      ActionResult(false, "Failed to open SMS: ${e.message}", ActionIconType.APP)
+    }
+  }
+
+  /**
+   * Initiates a phone call or opens dialer.
    */
   fun makeCall(phoneNumber: String): ActionResult {
     val cleanedNumber = phoneNumber.replace(Regex("[^0-9+]"), "")
     if (cleanedNumber.isEmpty()) {
-      return ActionResult(
-        success = false,
-        message = "Invalid phone number provided.",
-        actionType = ActionIconType.CALL
-      )
+      return ActionResult(false, "Invalid phone number provided.", ActionIconType.CALL)
     }
 
     val hasCallPermission = ContextCompat.checkSelfPermission(
@@ -236,33 +381,17 @@ class DeviceActionManager(private val context: Context) {
           addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(callIntent)
-        ActionResult(
-          success = true,
-          message = "Calling $cleanedNumber...",
-          actionType = ActionIconType.CALL,
-          detail = cleanedNumber
-        )
+        ActionResult(true, "Calling $cleanedNumber...", ActionIconType.CALL, cleanedNumber)
       } else {
-        // Fallback to opening phone dialer safely with number pre-filled
         val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$cleanedNumber")).apply {
           addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(dialIntent)
-        ActionResult(
-          success = true,
-          message = "Opened dialer with $cleanedNumber. Tap call button to connect.",
-          actionType = ActionIconType.CALL,
-          detail = cleanedNumber
-        )
+        ActionResult(true, "Opened dialer with $cleanedNumber.", ActionIconType.CALL, cleanedNumber)
       }
     } catch (e: Exception) {
       Log.e(TAG, "Error making call to $cleanedNumber", e)
-      ActionResult(
-        success = false,
-        message = "Could not place call: ${e.message}",
-        actionType = ActionIconType.CALL,
-        detail = cleanedNumber
-      )
+      ActionResult(false, "Could not place call: ${e.message}", ActionIconType.CALL, cleanedNumber)
     }
   }
 
@@ -281,15 +410,51 @@ class DeviceActionManager(private val context: Context) {
     if (!hasContactsPermission) {
       return ActionResult(
         success = false,
-        message = "Contacts permission is required to search and call contacts. Please grant permission.",
+        message = "Contacts permission is required to search contacts. Please grant Contacts permission.",
         actionType = ActionIconType.CALL,
         detail = "Permission: READ_CONTACTS"
       )
     }
 
     val trimmedQuery = contactName.trim()
-    val matches = mutableListOf<ContactMatch>()
+    val matches = searchContacts(trimmedQuery)
 
+    return when {
+      matches.isEmpty() -> {
+        ActionResult(
+          success = false,
+          message = "No contact found matching '$trimmedQuery'.",
+          actionType = ActionIconType.CALL,
+          detail = "Contact not found"
+        )
+      }
+
+      matches.size == 1 -> {
+        val contact = matches[0]
+        val callRes = makeCall(contact.number)
+        ActionResult(
+          success = callRes.success,
+          message = "Calling ${contact.name} (${contact.number})...",
+          actionType = ActionIconType.CALL,
+          detail = "${contact.name} • ${contact.number}"
+        )
+      }
+
+      else -> {
+        onMultipleMatches(matches)
+        val namesList = matches.joinToString(", ") { "${it.name} (${it.number})" }
+        ActionResult(
+          success = true,
+          message = "Found ${matches.size} contacts matching '$trimmedQuery': $namesList. Which one would you like to call?",
+          actionType = ActionIconType.CALL,
+          detail = "Multiple matches (${matches.size})"
+        )
+      }
+    }
+  }
+
+  fun searchContacts(query: String): List<ContactMatch> {
+    val matches = mutableListOf<ContactMatch>()
     val contentResolver = context.contentResolver
     val uri = ContactsContract.CommonDataKinds.Phone.CONTENT_URI
     val projection = arrayOf(
@@ -299,7 +464,7 @@ class DeviceActionManager(private val context: Context) {
     )
 
     val selection = "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?"
-    val selectionArgs = arrayOf("%$trimmedQuery%")
+    val selectionArgs = arrayOf("%$query%")
 
     try {
       contentResolver.query(
@@ -332,46 +497,8 @@ class DeviceActionManager(private val context: Context) {
         }
       }
     } catch (e: Exception) {
-      Log.e(TAG, "Error querying contacts for $trimmedQuery", e)
-      return ActionResult(
-        success = false,
-        message = "Error searching contacts: ${e.message}",
-        actionType = ActionIconType.CALL
-      )
+      Log.e(TAG, "Error querying contacts for $query", e)
     }
-
-    return when {
-      matches.isEmpty() -> {
-        ActionResult(
-          success = false,
-          message = "No contact found with name '$trimmedQuery'. Please check the contact name.",
-          actionType = ActionIconType.CALL,
-          detail = "Contact not found"
-        )
-      }
-
-      matches.size == 1 -> {
-        val contact = matches[0]
-        val callRes = makeCall(contact.number)
-        ActionResult(
-          success = callRes.success,
-          message = "Calling ${contact.name} (${contact.number})...",
-          actionType = ActionIconType.CALL,
-          detail = "${contact.name} • ${contact.number}"
-        )
-      }
-
-      else -> {
-        // Multiple matches: Notify callback to display disambiguation UI
-        onMultipleMatches(matches)
-        val namesList = matches.joinToString(", ") { "${it.name} (${it.number})" }
-        ActionResult(
-          success = true,
-          message = "Found ${matches.size} contacts matching '$trimmedQuery': $namesList. Which one would you like to call?",
-          actionType = ActionIconType.CALL,
-          detail = "Multiple matches (${matches.size})"
-        )
-      }
-    }
+    return matches
   }
 }
